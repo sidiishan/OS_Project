@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>OS‑Level Simulator: Caller ID & Spam Detection (Truecaller Kernel)</title>
+  <!-- Font & Tailwind + minimal extra style -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    body { background: radial-gradient(circle at 20% 30%, #0a0f1c, #03060c); }
+    /* Truecaller inspired colors: deep navy, vibrant teal, warm accents */
+    .truecaller-glass {
+      background: rgba(18, 28, 40, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(0, 210, 190, 0.3);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+    .truecaller-card {
+      background: rgba(12, 20, 30, 0.65);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(0, 210, 190, 0.2);
+      transition: all 0.2s ease;
+    }
+    .call-card {
+      transition: all 0.2s ease;
+    }
+    .call-card:hover {
+      transform: translateX(4px);
+      background: rgba(0, 210, 190, 0.08);
+      border-left: 3px solid #00d2be;
+    }
+    .spam-badge {
+      background: linear-gradient(135deg, #e11d48, #be123c);
+      box-shadow: 0 0 6px rgba(225,29,72,0.5);
+    }
+    .safe-badge {
+      background: linear-gradient(135deg, #10b981, #059669);
+    }
+    .kernel-log {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      line-height: 1.4;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #0f172a; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb { background: #00d2be; border-radius: 10px; }
+    .scrollable-panel {
+      max-height: 380px;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+    .metrics-grid-scroll {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body class="min-h-screen p-5 md:p-7 text-slate-100">
+
+  <div class="max-w-7xl mx-auto">
+    <!-- Header with Truecaller style identity -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-7">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-teal-400 to-emerald-400 shadow-lg flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-teal-200 to-emerald-200 bg-clip-text text-transparent">Caller ID Kernel · Truecaller OS Simulation</h1>
+          <p class="text-slate-400 text-xs md:text-sm mt-1">Process-level caller identification | Spam detection engine | Ring & block simulation</p>
+        </div>
+      </div>
+      <div class="text-right text-xs text-slate-400 border-l border-teal-500/30 pl-4">
+        <div class="font-semibold text-teal-300">OS MODULE v2.0</div>
+        <div>Caller Verification Subsystem</div>
+      </div>
+    </div>
+
+    <div class="grid lg:grid-cols-12 gap-6">
+      <!-- LEFT PANEL: Caller DB & Registration -->
+      <div class="lg:col-span-4 space-y-5">
+        <!-- Add / Register contact -->
+        <div class="truecaller-glass rounded-2xl p-5 shadow-xl">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-bold flex items-center gap-2"><span class="w-2 h-2 bg-teal-400 rounded-full"></span> Contact Registry</h2>
+            <span class="text-[11px] text-slate-400 bg-black/30 px-2 py-1 rounded-full">Whitelist + Reputation</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div class="col-span-2">
+              <label class="block text-slate-300 text-xs mb-1">📞 Caller Number / ID</label>
+              <input id="callerNumber" type="text" placeholder="e.g., +91 9876543210" class="w-full rounded-xl px-3 py-2 bg-slate-900/60 border border-slate-700 focus:border-teal-400 outline-none text-white text-sm">
+            </div>
+            <div>
+              <label class="block text-slate-300 text-xs mb-1">👤 Caller Name</label>
+              <input id="callerName" type="text" placeholder="Name" class="w-full rounded-xl px-3 py-2 bg-slate-900/60 border border-slate-700 focus:border-teal-400 outline-none">
+            </div>
+            <div>
+              <label class="block text-slate-300 text-xs mb-1">⚠️ Spam Score (0-10)</label>
+              <input id="spamScore" type="number" min="0" max="10" value="2" step="1" class="w-full rounded-xl px-3 py-2 bg-slate-900/60 border border-slate-700">
+            </div>
+          </div>
+          <div class="flex gap-3 mt-4">
+            <button id="registerContactBtn" class="flex-1 bg-gradient-to-r from-teal-500 to-cyan-500 text-slate-900 font-bold py-2 rounded-xl hover:scale-[1.01] transition-all shadow-md">➕ Register Contact</button>
+            <button id="clearRegistryBtn" class="px-4 bg-slate-800/80 border border-slate-600 rounded-xl hover:bg-slate-700">Clear All</button>
+          </div>
+          <div class="mt-3 text-[11px] text-slate-400 flex justify-between">
+            <span>🔹 Spam threshold: score ≥ 7 → auto spam</span>
+            <span>🔸 Priority reputation: lower spam score = trusted</span>
+          </div>
+        </div>
+
+        <!-- Incoming Call Simulator -->
+        <div class="truecaller-glass rounded-2xl p-5">
+          <h2 class="text-lg font-bold flex items-center gap-2"><span class="w-2 h-2 bg-amber-400 animate-pulse rounded-full"></span> 📞 Incoming Call Queue</h2>
+          <div class="mt-2 space-y-3">
+            <div class="flex gap-2">
+              <input id="incomingNumber" type="text" placeholder="Caller number (e.g., +91 9998887777)" class="flex-1 rounded-xl bg-slate-900/80 border border-slate-600 px-3 py-2 text-sm">
+              <button id="simulateCallBtn" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-4 rounded-xl transition">Ring 🕀</button>
+            </div>
+            <div class="flex gap-2">
+              <select id="callTypePreset" class="bg-slate-800 rounded-xl text-sm px-2 py-2 border border-slate-600">
+                <option value="random">🔀 Random registered / spam</option>
+                <option value="unknown">❓ Unknown (new caller)</option>
+                <option value="trusted">✅ Trusted low spam</option>
+              </select>
+              <button id="autoCallBtn" class="bg-indigo-600/70 text-white text-sm px-3 rounded-xl hover:bg-indigo-500">Auto Call Burst</button>
+            </div>
+          </div>
+          <div class="mt-4 text-xs text-slate-300 bg-slate-900/40 p-2 rounded-lg flex items-center justify-between">
+            <span>⚙️ OS Scheduler: Priority-based spam filtering + caller ID resolution</span>
+            <span id="callCounter" class="font-mono bg-black/50 px-2 py-0.5 rounded-full">0 calls</span>
+          </div>
+        </div>
+
+        <!-- Legend / stats compact -->
+        <div class="truecaller-glass rounded-2xl p-4">
+          <h3 class="text-sm font-semibold text-teal-300">📡 Kernel Telemetry</h3>
+          <div class="grid grid-cols-2 gap-2 mt-2 text-xs">
+            <div class="flex justify-between"><span>📒 Total contacts:</span><span id="totalContactsStat" class="font-bold text-teal-300">0</span></div>
+            <div class="flex justify-between"><span>🚨 Spam entries:</span><span id="spamEntriesStat" class="font-bold text-red-400">0</span></div>
+            <div class="flex justify-between"><span>🛡️ Safe entries:</span><span id="safeEntriesStat" class="font-bold text-emerald-400">0</span></div>
+            <div class="flex justify-between"><span>📞 Calls processed:</span><span id="callsProcessedStat" class="font-bold text-amber-300">0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT PANEL: All main content with BIG scrollable panels (Call Log, Analytics, OS Logic) -->
+      <div class="lg:col-span-8 space-y-5">
+        <!-- Caller ID Resolution Log - LARGE scrollable -->
+        <div class="truecaller-glass rounded-2xl p-5">
+          <div class="flex justify-between items-center mb-3 flex-wrap gap-2">
+            <h2 class="text-xl font-bold flex items-center gap-2"><span class="w-6 h-6 rounded-full bg-teal-500/30 flex items-center justify-center text-xs">🆔</span> Caller ID Resolution Log</h2>
+            <button id="clearCallLogsBtn" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-full">Clear history</button>
+          </div>
+          <div id="callLogContainer" class="space-y-2 scrollable-panel" style="max-height: 360px; overflow-y: auto;">
+            <div class="text-center text-slate-500 text-sm py-6">No incoming calls yet. Simulate a call to see OS-level identification & spam verdict.</div>
+          </div>
+        </div>
+
+        <!-- Two BIG cards: Call Analytics & OS Scheduler Logic (same size as Call Log, scrollable) -->
+        <div class="grid md:grid-cols-2 gap-5">
+          <!-- Call Analytics Big Panel -->
+          <div class="truecaller-card rounded-2xl p-5 flex flex-col">
+            <h3 class="text-xl font-bold flex items-center gap-2 text-teal-200">📊 Call Analytics <span class="text-[11px] text-slate-400 font-normal">(real-time metrics)</span></h3>
+            <div class="mt-3 space-y-3 text-sm flex-1">
+              <div class="metrics-grid-scroll" style="max-height: 280px; overflow-y: auto; padding-right: 5px;">
+                <div class="flex justify-between border-b border-slate-700/50 pb-2 mb-2"><span>✅ Identified contacts</span><span id="identifiedCount" class="font-mono text-teal-300 text-base">0</span></div>
+                <div class="flex justify-between border-b border-slate-700/50 pb-2 mb-2"><span>⚠️ Spam blocked</span><span id="spamBlockedCount" class="font-mono text-red-300 text-base">0</span></div>
+                <div class="flex justify-between border-b border-slate-700/50 pb-2 mb-2"><span>🆔 Unknown callers</span><span id="unknownCount" class="font-mono text-amber-300 text-base">0</span></div>
+                <div class="flex justify-between border-b border-slate-700/50 pb-2 mb-2"><span>🛡️ Avg spam score (detected)</span><span id="avgSpamScoreMetric" class="font-mono text-emerald-300 text-base">0.00</span></div>
+                <div class="flex justify-between pt-1"><span>📞 Total calls handled</span><span id="totalCallsMetric" class="font-mono text-white text-base">0</span></div>
+                <div class="mt-3 pt-2 text-xs text-slate-400 italic border-t border-slate-700/40">Truecaller OS: Spam score ≥ 7 triggers kernel-level block</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- OS Scheduler Logic Big Panel -->
+          <div class="truecaller-card rounded-2xl p-5 flex flex-col">
+            <h3 class="text-xl font-bold flex items-center gap-2 text-teal-200">⚡ OS Scheduler Logic <span class="text-[11px] text-slate-400">(call processing pipeline)</span></h3>
+            <div class="mt-3 space-y-3 text-sm flex-1">
+              <div class="metrics-grid-scroll" style="max-height: 280px; overflow-y: auto; padding-right: 5px;">
+                <div class="bg-slate-900/50 p-3 rounded-xl mb-3">
+                  <div class="flex gap-2 items-start">
+                    <span class="text-teal-400 font-bold text-base">1️⃣</span>
+                    <span class="text-slate-200">Incoming call triggers <span class="text-teal-300 font-mono">process (PID = caller number)</span> → OS interrupt</span>
+                  </div>
+                </div>
+                <div class="bg-slate-900/50 p-3 rounded-xl mb-3">
+                  <div class="flex gap-2 items-start">
+                    <span class="text-teal-400 font-bold text-base">2️⃣</span>
+                    <span class="text-slate-200">Lookup in Contact DB → fetch spam score &amp; caller reputation</span>
+                  </div>
+                </div>
+                <div class="bg-slate-900/50 p-3 rounded-xl mb-3">
+                  <div class="flex gap-2 items-start">
+                    <span class="text-teal-400 font-bold text-base">3️⃣</span>
+                    <span class="text-slate-200"><strong class="text-amber-300">Priority decision:</strong> If spam_score ≥ 7 → auto <span class="text-red-400 font-bold">BLOCK (preemptive kill)</span></span>
+                  </div>
+                </div>
+                <div class="bg-slate-900/50 p-3 rounded-xl mb-3">
+                  <div class="flex gap-2 items-start">
+                    <span class="text-teal-400 font-bold text-base">4️⃣</span>
+                    <span class="text-slate-200">Else display caller ID + reputation (safe / medium risk) with ring emulation</span>
+                  </div>
+                </div>
+                <div class="bg-slate-900/50 p-3 rounded-xl">
+                  <div class="flex gap-2 items-start">
+                    <span class="text-teal-400 font-bold text-base">⚙️</span>
+                    <span class="text-slate-300 text-xs font-mono">"Ring" emulated with OS-level verdict & log entry. Priority queue based on spam severity.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Export / reset tools -->
+        <div class="flex gap-3 justify-end">
+          <button id="exportCallLogBtn" class="text-xs bg-slate-800 px-4 py-2 rounded-xl border border-slate-600 hover:bg-slate-700">📎 Export Call Log (CSV)</button>
+          <button id="resetSimulationBtn" class="text-xs bg-red-950/60 px-4 py-2 rounded-xl hover:bg-red-900/70 border border-red-800/40">⟳ Reset Full Simulation</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- OS-Level Data Structures ----------
+    let contactDatabase = [];   // each: { id, number, name, spamScore }
+    let callHistory = [];       // each: { timestamp, callerNumber, resolvedName, spamScore, verdict, blocked }
+
+    // Metrics
+    let stats = {
+      identified: 0,
+      spamBlocked: 0,
+      unknownCallers: 0,
+      totalSpamScoreSum: 0,
+      totalCallsProcessed: 0
+    };
+
+    // Helper: update contact stats & registry UI
+    function updateContactStatsUI() {
+      const total = contactDatabase.length;
+      const spamEntries = contactDatabase.filter(c => c.spamScore >= 7).length;
+      const safeEntries = total - spamEntries;
+      document.getElementById("totalContactsStat").innerText = total;
+      document.getElementById("spamEntriesStat").innerText = spamEntries;
+      document.getElementById("safeEntriesStat").innerText = safeEntries;
+      renderContactTable();
+    }
+
+    function renderContactTable() {
+      let container = document.getElementById("contactListDynamic");
+      if (!container) {
+        const registryDiv = document.querySelector(".truecaller-glass.rounded-2xl.p-5");
+        if (registryDiv) {
+          let existing = document.getElementById("contactListDynamic");
+          if (!existing) {
+            const div = document.createElement("div");
+            div.id = "contactListDynamic";
+            div.className = "mt-4 max-h-40 overflow-y-auto text-xs";
+            registryDiv.appendChild(div);
+            container = div;
+          } else container = existing;
+        }
+      }
+      if (container) {
+        if (contactDatabase.length === 0) {
+          container.innerHTML = '<div class="text-slate-500 italic text-center py-2">📭 No contacts registered</div>';
+          return;
+        }
+        let html = '<div class="space-y-1 mt-2"><div class="grid grid-cols-3 gap-1 text-[10px] text-slate-400 border-b border-slate-700 pb-1"><span>Number</span><span>Name</span><span>SpamScore</span></div>';
+        contactDatabase.slice(0, 8).forEach(c => {
+          html += `<div class="grid grid-cols-3 gap-1 py-1 border-b border-slate-800/50"><span class="truncate">${c.number}</span><span>${c.name}</span><span class="${c.spamScore>=7?'text-red-400':'text-emerald-300'}">${c.spamScore}</span></div>`;
+        });
+        if (contactDatabase.length > 8) html += `<div class="text-[10px] text-slate-500 text-center">+${contactDatabase.length-8} more</div>`;
+        html += '</div>';
+        container.innerHTML = html;
+      }
+    }
+
+    function registerContact(number, name, spamScore) {
+      if (!number.trim() || !name.trim()) return false;
+      const exists = contactDatabase.find(c => c.number === number);
+      if (exists) {
+        alert("Caller ID already exists. Use different number or edit.");
+        return false;
+      }
+      const spamVal = Math.min(10, Math.max(0, parseInt(spamScore) || 0));
+      contactDatabase.push({ id: Date.now() + Math.random(), number: number.trim(), name: name.trim(), spamScore: spamVal });
+      updateContactStatsUI();
+      return true;
+    }
+
+    // OS-level caller identification + spam detection (Scheduler simulation)
+    function processIncomingCall(callerNumber) {
+      if (!callerNumber.trim()) {
+        alert("Enter a valid caller number");
+        return null;
+      }
+      const contact = contactDatabase.find(c => c.number === callerNumber);
+      let resolvedName = null;
+      let spamScore = 5;   // default medium risk for unknown
+      let identifiedFlag = false;
+
+      if (contact) {
+        resolvedName = contact.name;
+        spamScore = contact.spamScore;
+        identifiedFlag = true;
+      } else {
+        resolvedName = "Unknown Caller";
+        spamScore = 6;   // unknown default moderate-high
+        identifiedFlag = false;
+      }
+      
+      const blocked = (spamScore >= 7);
+      let verdictMsg = "";
+      if (blocked) {
+        verdictMsg = `🚫 BLOCKED (spam score ${spamScore}/10) · Kernel preemptive kill`;
+      } else if (spamScore >= 4) {
+        verdictMsg = `⚠️ MEDIUM RISK · Score ${spamScore}/10 · Show cautiously`;
+      } else {
+        verdictMsg = `✅ SAFE · Trusted caller (score ${spamScore}) · Ring allowed`;
+      }
+      
+      // update stats
+      stats.totalCallsProcessed++;
+      if (identifiedFlag) stats.identified++;
+      if (blocked) stats.spamBlocked++;
+      if (!identifiedFlag && !contact) stats.unknownCallers++;
+      stats.totalSpamScoreSum += spamScore;
+      
+      const timestamp = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      const logEntry = {
+        timestamp,
+        callerNumber,
+        resolvedName: resolvedName || (contact?.name || "Unknown"),
+        spamScore,
+        verdict: verdictMsg,
+        blocked,
+        identified: identifiedFlag
+      };
+      callHistory.unshift(logEntry);
+      updateCallLogUI();
+      updateMetricsUI();
+      
+      document.getElementById("callCounter").innerText = stats.totalCallsProcessed;
+      document.getElementById("callsProcessedStat").innerText = stats.totalCallsProcessed;
+      return logEntry;
+    }
+
+    function updateCallLogUI() {
+      const container = document.getElementById("callLogContainer");
+      if (!container) return;
+      if (callHistory.length === 0) {
+        container.innerHTML = '<div class="text-center text-slate-500 text-sm py-6">📞 No incoming calls yet. Use call simulator above.</div>';
+        return;
+      }
+      let html = '';
+      callHistory.slice(0, 30).forEach(call => {
+        const bgClass = call.blocked ? 'bg-red-950/30 border-l-4 border-red-500' : (call.spamScore >= 4 ? 'bg-amber-950/20 border-l-4 border-amber-500' : 'bg-emerald-950/20 border-l-4 border-emerald-500');
+        const badgeClass = call.blocked ? 'spam-badge text-white text-[10px] px-2 py-0.5 rounded-full' : 'safe-badge text-white text-[10px] px-2 py-0.5 rounded-full';
+        const badgeText = call.blocked ? '🚫 BLOCKED' : (call.spamScore >= 4 ? '⚠️ REVIEW' : '🟢 ALLOW');
+        html += `
+          <div class="call-card p-3 rounded-xl ${bgClass} bg-slate-800/40 backdrop-blur-sm flex flex-wrap justify-between items-start gap-2">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-mono text-sm font-bold">${escapeHtml(call.callerNumber)}</span>
+                <span class="text-xs text-teal-300">➡️ ${escapeHtml(call.resolvedName)}</span>
+                <span class="${badgeClass} text-[10px] font-semibold">${badgeText}</span>
+              </div>
+              <div class="text-xs text-slate-300 mt-1 flex gap-3 flex-wrap">
+                <span>📊 SpamScore: ${call.spamScore}/10</span>
+                <span class="text-slate-400">🕒 ${call.timestamp}</span>
+              </div>
+              <div class="text-[11px] text-slate-300 mt-1">${escapeHtml(call.verdict)}</div>
+            </div>
+            <div class="text-[10px] text-slate-400 font-mono">OS: ${call.blocked ? 'KILLED' : 'SCHEDULED'}</div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+    
+    function escapeHtml(str) { return str.replace(/[&<>]/g, function(m){if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+
+    function updateMetricsUI() {
+      document.getElementById("identifiedCount").innerText = stats.identified;
+      document.getElementById("spamBlockedCount").innerText = stats.spamBlocked;
+      document.getElementById("unknownCount").innerText = stats.unknownCallers;
+      const avgSpam = stats.totalCallsProcessed === 0 ? 0 : (stats.totalSpamScoreSum / stats.totalCallsProcessed);
+      document.getElementById("avgSpamScoreMetric").innerText = avgSpam.toFixed(2);
+      document.getElementById("callsProcessedStat").innerText = stats.totalCallsProcessed;
+      document.getElementById("callCounter").innerText = stats.totalCallsProcessed;
+      document.getElementById("totalCallsMetric").innerText = stats.totalCallsProcessed;
+    }
+
+    function resetFullSimulation() {
+      contactDatabase = [];
+      callHistory = [];
+      stats = { identified: 0, spamBlocked: 0, unknownCallers: 0, totalSpamScoreSum: 0, totalCallsProcessed: 0 };
+      updateContactStatsUI();
+      updateCallLogUI();
+      updateMetricsUI();
+      document.getElementById("callCounter").innerText = "0";
+      document.getElementById("callsProcessedStat").innerText = "0";
+      const dynamicList = document.getElementById("contactListDynamic");
+      if (dynamicList) dynamicList.innerHTML = '<div class="text-slate-500 italic text-center py-2">📭 No contacts registered</div>';
+    }
+
+    function exportCallLogsCSV() {
+      if (callHistory.length === 0) { alert("No call logs to export."); return; }
+      const headers = ["Timestamp", "Caller Number", "Resolved Name", "Spam Score", "Verdict", "Blocked"];
+      const rows = callHistory.map(c => [c.timestamp, c.callerNumber, c.resolvedName, c.spamScore, c.verdict, c.blocked ? "Yes" : "No"]);
+      const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csvContent], {type: "text/csv;charset=utf-8;"});
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.href = url;
+      link.setAttribute("download", "truecaller_os_log.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    function autoCallBurst() {
+      const preset = document.getElementById("callTypePreset").value;
+      let numbersToCall = [];
+      if (preset === "random" && contactDatabase.length > 0) {
+        const randomContact = contactDatabase[Math.floor(Math.random() * contactDatabase.length)];
+        numbersToCall.push(randomContact.number);
+        numbersToCall.push("+91" + Math.floor(Math.random() * 9000000000));
+      } else if (preset === "trusted" && contactDatabase.length > 0) {
+        const trusted = contactDatabase.filter(c => c.spamScore < 4);
+        if (trusted.length) numbersToCall.push(trusted[0].number);
+        else numbersToCall.push("+1800SAFE123");
+      } else {
+        numbersToCall.push("+" + Math.floor(Math.random() * 9999999999));
+      }
+      if (numbersToCall.length === 0) numbersToCall.push("+11234567890");
+      numbersToCall.forEach(num => processIncomingCall(num));
+    }
+
+    // Event listeners
+    document.getElementById("registerContactBtn").addEventListener("click", () => {
+      const number = document.getElementById("callerNumber").value;
+      const name = document.getElementById("callerName").value;
+      const score = parseInt(document.getElementById("spamScore").value);
+      if (registerContact(number, name, score)) {
+        document.getElementById("callerNumber").value = "";
+        document.getElementById("callerName").value = "";
+        document.getElementById("spamScore").value = "2";
+      } else if (!number || !name) alert("Please fill number and name");
+    });
+    document.getElementById("clearRegistryBtn").addEventListener("click", () => {
+      if (confirm("Clear all registered contacts? Calls will treat them as unknown.")) {
+        contactDatabase = [];
+        updateContactStatsUI();
+      }
+    });
+    document.getElementById("simulateCallBtn").addEventListener("click", () => {
+      const number = document.getElementById("incomingNumber").value;
+      if (!number.trim()) alert("Enter caller number to simulate");
+      else processIncomingCall(number);
+      document.getElementById("incomingNumber").value = "";
+    });
+    document.getElementById("autoCallBtn").addEventListener("click", () => autoCallBurst());
+    document.getElementById("clearCallLogsBtn").addEventListener("click", () => {
+      callHistory = [];
+      stats.totalCallsProcessed = 0;
+      stats.identified = 0; stats.spamBlocked = 0; stats.unknownCallers = 0; stats.totalSpamScoreSum = 0;
+      updateCallLogUI();
+      updateMetricsUI();
+      document.getElementById("callCounter").innerText = "0";
+    });
+    document.getElementById("exportCallLogBtn").addEventListener("click", exportCallLogsCSV);
+    document.getElementById("resetSimulationBtn").addEventListener("click", () => {
+      if (confirm("Reset entire simulation: all contacts, call logs and stats will be erased.")) resetFullSimulation();
+    });
+    
+    // Demo contacts (Truecaller style preset)
+    function loadDemoContacts() {
+      registerContact("+1 555 123 4567", "Alice Cooper", 1);
+      registerContact("+91 98765 43210", "Spam Telecom", 9);
+      registerContact("+44 20 7946 0118", "Bank Support", 2);
+      registerContact("+1 800 555 0199", "Scam Alert", 8);
+      registerContact("+91 9988776655", "Mom", 0);
+      registerContact("+91 8888881111", "Tech Support", 6);
+      updateContactStatsUI();
+    }
+    loadDemoContacts();
+    renderContactTable();
+  </script>
+</body>
+</html>
